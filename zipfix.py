@@ -1,5 +1,7 @@
 '''https://docs.python.org/3/library/struct.html'''
 import struct
+import sys
+import copy
 
 
 def findLocalFileHeaders(header_count):
@@ -62,7 +64,7 @@ def findLocalFileHeaders(header_count):
         offset += file_name_len  # now lets move to the end of the file name
         # and use it to start on the extra field, ending at the indicated variable size
         extra = data[offset:offset+extra_len]
-
+        offset += extra_len + comp_size  # go to the next header and skip the file's data
         """
         Create record
         """
@@ -80,8 +82,9 @@ def findLocalFileHeaders(header_count):
                   'B@File name': filename,
                   'B@Extra field': extra
                   }
+        localheaders[hex(start_offset)] = record
         print(str(hex(start_offset))+':'+str(record)+"\n")
-        offset += extra_len + comp_size  # go to the next header
+
         # grab_header(start_offset, start)
     end_offset = offset
     row = end_offset/16
@@ -200,18 +203,21 @@ def findCDFileHeaders(offset, header_count):
                   'H@Disk # start': disk_num,
                   'B@Internal attr.': inter_attr,
                   'B@External attr.': exter_attr,
-                  'L@Offset of local header': offset_local_header,
+                  'L@Offset of local header': offset_local_header[0],
                   'B@File name': filename,
                   'B@Extra field': extra,
                   'B@File Comment': comment
                   }
+        centralheaders[hex(start_offset)] = record
+        headerpairs[hex(offset_local_header[0])] = hex(start_offset)
+
         print(str(hex(start_offset))+':'+str(record)+'\n')
-        # grab_header(hex(start_offset), hex(offset))
+        #show_header(hex(start_offset), hex(offset))
 
     end_offset = offset
     row = end_offset/16
     print(str(i)+" Central File Headers found. \n Final central file header ending offset: " +
-          str(hex(end_offset))+":"+str(end_offset-start_offset)+"B Row:"+str(row)+"\n\n")
+          str(hex(end_offset))+":"+str(end_offset)+"B Row:"+str(row)+"\n\n")
     return start_offset, end_offset
 
 
@@ -235,9 +241,9 @@ def findEOCDR(offset):
                   'H@Comnt Len': cm_len,
                   'B@Comment': zip_comment}
         print(str(hex(start_offset))+':'+str(record)+"\n")
+        finalheader[hex(start_offset)] = record
     else:
         print("INVALID SIGNATURE FOR EOCDR\n FOUND - "+str(sig)+"\n")
-        return start_offset, offset
     # grab_header(hex(start_offset), hex(offset))
     return start_offset, offset
 
@@ -248,28 +254,41 @@ def encodeHeader(header):
         encodeWith = key.split('@')[0]
         if('B' in encodeWith):
             byte = header[key]
+            nheader.append(byte)
         else:
-            byte = struct.pack(encodeWith, header[key])
-        nheader.append(byte)
+            i = 0
+            if(len(encodeWith) > 1):
+                for struc in encodeWith:
+                    byte = struct.pack(struc, header[key][i])
+                    nheader.append(byte)
+                    i += 1
+            else:
+                byte = struct.pack(encodeWith, header[key])
+                nheader.append(byte)
     return nheader
 
 
-def replaceHeader(offset, header):
-    f = open(file, "r+b")
+def writeHeader(file, offset, header, append=False):
+    if(append):
+        f = open(file, "a+b")
+    else:
+        f = open(file, "r+b")
     f.seek(offset)
     for each in header:
         f.write(each)
+    pos = f.tell()
     f.close()
+    return pos
 
 
-def grab_header(start_offset, end_offset):
+def show_header(start_offset, end_offset):
     start_offset = int(start_offset, 16)
     end_offset = int(end_offset, 16)
     header = ''
     offset = 0
     cycle = 0
     for byte in data.hex(' ').split(' '):
-        if(offset >= start_offset and offset <= end_offset):
+        if(offset >= start_offset and offset < end_offset):
             header += byte
             if(cycle == 1):
                 header += ' '
@@ -280,10 +299,48 @@ def grab_header(start_offset, end_offset):
     print(header)
 
 
+def resolveMisCDir(l_offset, cex_offset, end_dir_offset):
+    # pull template central directory from previous entry
+    record = copy.deepcopy(centralheaders[cex_offset])
+    # pull the local record to modify template
+    l_record = localheaders[l_offset]
+    record['cc@Version'] = l_record['cc@Version']
+    record['cc@Flags'] = l_record['cc@Flags']
+    record['cc@Compression'] = l_record['cc@Compression']
+    record['cc@Mod Time'] = l_record['cc@Mod Time']
+    record['cc@Mod Date'] = l_record['cc@Mod Date']
+    record['L@Crc-32'] = l_record['L@Crc-32']
+    record['L@Compressed size'] = l_record['L@Compressed size']
+    record['L@Uncompressed size'] = l_record['L@Uncompressed size']
+    record['H@File name len'] = l_record['H@File name len']
+    record['H@Extra field len'] = l_record['H@Extra field len']
+    record['B@File name'] = l_record['B@File name']
+    record['B@Extra field'] = l_record['B@Extra field']
+    record['L@Offset of local header'] = int(l_offset, 16)
+
+    print('Modified Records\n'+str(record)+'\n')
+    end_offset = writeHeader(file, end_dir_offset, encodeHeader(record))
+
+    record = copy.deepcopy(finalheader[hex(end_dir_offset)])
+    record['H@Disk Entries'] = record['H@Disk Entries'] + 1
+    record['H@Tot Entries'] = record['H@Tot Entries'] + 1
+    print(record)
+
+    writeHeader(file, end_offset, encodeHeader(record))
+
+
 if __name__ == '__main__':
     N = 10000
-    file = 'sample/ans.zip'
-    data = open(file, 'rb').read()
+    localheaders = dict()
+    centralheaders = dict()
+    headerpairs = dict()
+    finalheader = dict()
+    file = sys.argv[1]
+    print("Performing analysis on "+file+"\n")
+    try:
+        data = open(file, 'rb').read()
+    except:
+        print("Error reading entered file.")
 
     print("Local File Headers:")
     end_offset = findLocalFileHeaders(N)
@@ -297,7 +354,15 @@ if __name__ == '__main__':
     row = end_offset/16
     print("Finished at ending offset: " +
           str(hex(end_offset))+":"+str(end_offset-start_offset)+"B Row:"+str(row)+"\n\n")
-    #header = record
-    # header['H@Disk Entries'] = 5
-    # header['H@Tot Entries'] = 5
-    # replaceHeader(start_offset, encodeHeader(header))
+    if('-f' in sys.argv):  # starts fixing procedure
+        if(len(localheaders) != len(centralheaders)):
+            ex_offset = None
+            for localheader in localheaders:
+                if localheader in headerpairs:
+                    ex_offset = headerpairs[localheader]
+                    continue
+                else:
+                    print('Missing central directory for: '+localheader)
+                    resolveMisCDir(localheader, ex_offset, start_offset)
+        else:
+            print("No tampered central directories detected in zip archive.")
