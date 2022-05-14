@@ -90,8 +90,8 @@ def findLocalFileHeaders(header_count):
         # grab_header(start_offset, start)
     end_offset = offset
     row = end_offset/16
-    print(str(i)+" Local File Headers found. \n Final local file header ending offset: "+str(hex(end_offset)) +
-          ":"+str(end_offset)+"B Column:"+str(row)+"\n\n")
+    print(str(i)+" Local File Headers found. \nFinal local file header ending offset: " +
+          str(hex(end_offset))+"\n")
     return end_offset
 
 
@@ -218,8 +218,8 @@ def findCDFileHeaders(offset, header_count):
 
     end_offset = offset
     row = end_offset/16
-    print(str(i)+" Central File Headers found. \n Final central file header ending offset: " +
-          str(hex(end_offset))+":"+str(end_offset)+"B Row:"+str(row)+"\n\n")
+    print(str(i)+" Central File Headers found. \nFinal central file header ending offset: " +
+          str(hex(end_offset))+"\n")
     return start_offset, end_offset
 
 
@@ -347,7 +347,7 @@ def displayRecord(record):
 
 if __name__ == '__main__':
 
-    if(len(sys.argv) >= 1):
+    if(len(sys.argv) >= 2):
         file = sys.argv[1]
     else:
         print(
@@ -382,7 +382,7 @@ if __name__ == '__main__':
 
     row = end_offset/16
     print("Finished at ending offset: " +
-          str(hex(end_offset))+":"+str(end_offset-start_offset)+"B Row:"+str(row)+"\n")
+          str(hex(end_offset))+"\n")
     print("---------------------------------------------------------------------------")
     if(len(localheaders) != len(centralheaders)):
         ex_offset = None
