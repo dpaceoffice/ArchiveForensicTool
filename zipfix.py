@@ -362,7 +362,7 @@ if __name__ == '__main__':
     try:
         data = open(file, 'rb').read()
     except:
-        print("Error reading entered file.")
+        print("Error reading binary of given path.")
         exit()
 
     N = 10000
