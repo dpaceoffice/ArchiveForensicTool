@@ -2,6 +2,7 @@
 import struct
 import sys
 import copy
+from os.path import exists
 
 
 def findLocalFileHeaders(header_count):
@@ -14,7 +15,7 @@ def findLocalFileHeaders(header_count):
         """
         Signature
         """
-        sig = (data[offset:offset+4], 'B')
+        sig = data[offset:offset+4]
         if(b'PK\x03\x04' not in sig):
             print("INVALID SIGNATURE - ENDING\n FOUND - "+str(sig)+"\n")
             break
@@ -83,7 +84,8 @@ def findLocalFileHeaders(header_count):
                   'B@Extra field': extra
                   }
         localheaders[hex(start_offset)] = record
-        print(str(hex(start_offset))+':'+str(record)+"\n")
+        print(str(hex(start_offset))+':' +
+              str(displayRecord(record))+"\n")
 
         # grab_header(start_offset, start)
     end_offset = offset
@@ -211,7 +213,7 @@ def findCDFileHeaders(offset, header_count):
         centralheaders[hex(start_offset)] = record
         headerpairs[hex(offset_local_header[0])] = hex(start_offset)
 
-        print(str(hex(start_offset))+':'+str(record)+'\n')
+        print(str(hex(start_offset))+':'+str(displayRecord(record))+'\n')
         #show_header(hex(start_offset), hex(offset))
 
     end_offset = offset
@@ -240,7 +242,8 @@ def findEOCDR(offset):
                   'L@Central Directory Offset': cd_offset,
                   'H@Comnt Len': cm_len,
                   'B@Comment': zip_comment}
-        print(str(hex(start_offset))+':'+str(record)+"\n")
+        print(str(hex(start_offset))+':' +
+              str(displayRecord(record))+"\n")
         finalheader[hex(start_offset)] = record
     else:
         print("INVALID SIGNATURE FOR EOCDR\n FOUND - "+str(sig)+"\n")
@@ -268,11 +271,8 @@ def encodeHeader(header):
     return nheader
 
 
-def writeHeader(file, offset, header, append=False):
-    if(append):
-        f = open(file, "a+b")
-    else:
-        f = open(file, "r+b")
+def writeHeader(file, offset, header):
+    f = open(file, "r+b")
     f.seek(offset)
     for each in header:
         f.write(each)
@@ -318,29 +318,58 @@ def resolveMisCDir(l_offset, cex_offset, end_dir_offset):
     record['B@Extra field'] = l_record['B@Extra field']
     record['L@Offset of local header'] = int(l_offset, 16)
 
-    print('Modified Records\n'+str(record)+'\n')
+    print('\nInserted missing record:\n'+str(displayRecord(record))+'\n')
     end_offset = writeHeader(file, end_dir_offset, encodeHeader(record))
 
     record = copy.deepcopy(finalheader[hex(end_dir_offset)])
     record['H@Disk Entries'] = record['H@Disk Entries'] + 1
     record['H@Tot Entries'] = record['H@Tot Entries'] + 1
-    print(record)
+    displayRecord(record)
 
     writeHeader(file, end_offset, encodeHeader(record))
 
 
+def displayRecord(record):
+    result = dict()
+    for key in record:
+        clean_key = key.split('@')[1]
+        value = record[key]
+        if(type(value) is (bytes)):
+            value = str(value.decode('latin-1'))
+        elif(type(value) is (tuple)):
+            final_value = ''
+            for each in value:
+                final_value += each.decode('latin-1')
+            value = final_value
+        result[clean_key] = value
+    return result
+
+
 if __name__ == '__main__':
+
+    if(len(sys.argv) >= 1):
+        file = sys.argv[1]
+    else:
+        print(
+            'Invalid input. Expected zipfix.py [file path] [options: -f(ix)]')
+        exit()
+    if(exists(file)):
+        print("Performing analysis on "+file+"\n")
+    else:
+        print("Path does not exist.")
+        exit()
+
+    try:
+        data = open(file, 'rb').read()
+    except:
+        print("Error reading entered file.")
+        exit()
+
     N = 10000
     localheaders = dict()
     centralheaders = dict()
     headerpairs = dict()
     finalheader = dict()
-    file = sys.argv[1]
-    print("Performing analysis on "+file+"\n")
-    try:
-        data = open(file, 'rb').read()
-    except:
-        print("Error reading entered file.")
 
     print("Local File Headers:")
     end_offset = findLocalFileHeaders(N)
@@ -353,16 +382,21 @@ if __name__ == '__main__':
 
     row = end_offset/16
     print("Finished at ending offset: " +
-          str(hex(end_offset))+":"+str(end_offset-start_offset)+"B Row:"+str(row)+"\n\n")
-    if('-f' in sys.argv):  # starts fixing procedure
-        if(len(localheaders) != len(centralheaders)):
-            ex_offset = None
-            for localheader in localheaders:
-                if localheader in headerpairs:
-                    ex_offset = headerpairs[localheader]
-                    continue
-                else:
-                    print('Missing central directory for: '+localheader)
-                    resolveMisCDir(localheader, ex_offset, start_offset)
-        else:
-            print("No tampered central directories detected in zip archive.")
+          str(hex(end_offset))+":"+str(end_offset-start_offset)+"B Row:"+str(row)+"\n")
+    print("---------------------------------------------------------------------------")
+    if(len(localheaders) != len(centralheaders)):
+        ex_offset = None
+        for localheader in localheaders:
+            if localheader in headerpairs:
+                ex_offset = headerpairs[localheader]
+                continue
+            else:
+                print('Missing central directory for: '+localheader)
+            if('-f' in sys.argv):  # starts fixing procedure
+                resolveMisCDir(localheader, ex_offset, start_offset)
+            else:
+                print('Use the fix option (-f) to modify the file directly.')
+                print(
+                    '--WARNING--\n By doing this the binary structure of the zip file will be modified resulting in a different hash.\n')
+    else:
+        print("No tampered central directories detected in zip archive.")
